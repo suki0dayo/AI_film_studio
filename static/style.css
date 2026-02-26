@@ -1,0 +1,110 @@
+/* ── 全局重置 ── */
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:#1a1a2e;color:#e0e0e0;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+/* ── 工具栏 ── */
+#toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#16213e;border-bottom:1px solid #0f3460;flex-shrink:0;flex-wrap:wrap}
+.logo{font-size:18px;font-weight:bold;color:#e94560;margin-right:8px}
+.toolbar-btns{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.toolbar-btns button{padding:5px 10px;background:#0f3460;border:1px solid #1a4a8a;color:#ccc;border-radius:4px;cursor:pointer;font-size:12px;transition:background .2s}
+.toolbar-btns button:hover{background:#1a4a8a;color:#fff}
+.sep{color:#444;margin:0 4px}
+
+/* ── 画布 ── */
+#canvas-wrap{flex:1;position:relative;overflow:hidden}
+#canvas{position:absolute;inset:0;width:5000px;height:5000px}
+#svg-layer{position:absolute;inset:0;width:5000px;height:5000px;pointer-events:none;z-index:1}
+#svg-layer path{fill:none;stroke:#4a9eff;stroke-width:2;opacity:.7}
+#svg-layer path.selected{stroke:#ffcc00;stroke-width:3}
+
+/* ── 节点卡片 ── */
+.node{position:absolute;width:220px;background:#16213e;border:2px solid #0f3460;border-radius:8px;cursor:move;z-index:10;user-select:none;box-shadow:0 4px 16px #0008}
+.node-header{padding:8px 10px;border-radius:6px 6px 0 0;display:flex;align-items:center;justify-content:space-between;font-size:13px;font-weight:bold}
+.node-body{padding:8px 10px;font-size:12px;color:#aaa;min-height:40px}
+.node-footer{padding:6px 10px;display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid #0f3460}
+.node-footer button{flex:1;padding:4px 6px;border:none;border-radius:4px;cursor:pointer;font-size:11px;font-weight:bold}
+.btn-pass{background:#1a6b3a;color:#7fff7f}
+.btn-pass:hover{background:#22883f}
+.btn-refresh{background:#5a4a00;color:#ffd700}
+.btn-refresh:hover{background:#7a6400}
+.btn-edit{background:#1a3a6b;color:#7fc4ff}
+.btn-edit:hover{background:#1a4a8a}
+.btn-log{background:#6b1a1a;color:#ff9999}
+.btn-log:hover{background:#8a2222}
+.btn-delete{background:#3a1a1a;color:#ff6666;padding:4px 6px;border:none;border-radius:4px;cursor:pointer;font-size:11px}
+
+/* ── 节点状态颜色 ── */
+.status-idle    .node-header{background:#2a2a3e;border-color:#444}
+.status-running .node-header{background:#3a3a00;border-color:#ffd700}
+.status-done    .node-header{background:#0a3a1a;border-color:#00cc66}
+.status-approved .node-header{background:#0a2a4a;border-color:#4a9eff}
+.status-error   .node-header{background:#3a0a0a;border-color:#ff4444}
+.status-idle    {border-color:#444}
+.status-running {border-color:#ffd700;animation:pulse .8s infinite alternate}
+.status-done    {border-color:#00cc66}
+.status-approved{border-color:#4a9eff}
+.status-error   {border-color:#ff4444}
+@keyframes pulse{from{box-shadow:0 0 4px #ffd70066}to{box-shadow:0 0 12px #ffd700cc}}
+
+/* ── 端口（连接点）── */
+.port{position:absolute;width:12px;height:12px;border-radius:50%;background:#4a9eff;border:2px solid #fff;cursor:crosshair;z-index:20;transition:transform .15s}
+.port:hover{transform:scale(1.5);background:#ffcc00}
+.port-out{right:-7px}
+.port-in {left:-7px}
+
+/* ── 状态徽章 ── */
+.status-badge{font-size:10px;padding:2px 6px;border-radius:10px;font-weight:normal}
+.badge-idle    {background:#444;color:#aaa}
+.badge-running {background:#ffd700;color:#000}
+.badge-done    {background:#00cc66;color:#000}
+.badge-approved{background:#4a9eff;color:#000}
+.badge-error   {background:#ff4444;color:#fff}
+
+/* ── 弹窗通用 ── */
+.hidden{display:none!important}
+#modal-overlay,#settings-overlay,#log-overlay,#preview-overlay{position:fixed;inset:0;background:#0009;z-index:100;display:flex;align-items:center;justify-content:center}
+#modal,#settings-modal,#log-modal{background:#16213e;border:1px solid #0f3460;border-radius:8px;width:600px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column}
+#log-modal{width:700px}
+#preview-modal{background:#16213e;border:1px solid #0f3460;border-radius:8px;width:700px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column}
+#modal-header,#settings-header,#log-header,#preview-header{padding:12px 16px;border-bottom:1px solid #0f3460;display:flex;justify-content:space-between;align-items:center;font-weight:bold}
+#modal-header button,#settings-header button,#log-header button,#preview-header button{background:none;border:none;color:#aaa;font-size:18px;cursor:pointer}
+#modal-body,#settings-body{padding:16px;overflow-y:auto;flex:1}
+#log-body{padding:16px;overflow:auto;flex:1;font-size:12px;color:#ff9999;white-space:pre-wrap;word-break:break-all}
+#preview-body{padding:16px;overflow-y:auto;flex:1}
+
+/* ── 设置表单 ── */
+#settings-body label{display:block;margin:10px 0 4px;font-size:12px;color:#aaa}
+#settings-body input{width:100%;padding:7px 10px;background:#0f3460;border:1px solid #1a4a8a;border-radius:4px;color:#fff;font-size:13px}
+.btn-primary{margin-top:16px;width:100%;padding:9px;background:#e94560;border:none;border-radius:4px;color:#fff;font-size:14px;cursor:pointer;font-weight:bold}
+.btn-primary:hover{background:#c73050}
+
+/* ── 节点详情弹窗内容 ── */
+.modal-section{margin-bottom:14px}
+.modal-section label{display:block;font-size:12px;color:#888;margin-bottom:4px}
+.modal-section textarea,.modal-section input[type=text]{width:100%;padding:7px;background:#0f3460;border:1px solid #1a4a8a;border-radius:4px;color:#fff;font-size:12px;resize:vertical}
+.modal-section textarea{min-height:80px}
+.modal-img-list{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.modal-img-list img{width:120px;height:80px;object-fit:cover;border-radius:4px;border:2px solid #0f3460;cursor:pointer}
+.modal-img-list img:hover{border-color:#4a9eff}
+.modal-img-list img.selected-img{border-color:#ffcc00}
+.modal-video-list video{width:100%;border-radius:4px;margin-top:6px}
+.file-upload-area{border:2px dashed #0f3460;border-radius:6px;padding:16px;text-align:center;cursor:pointer;color:#666;transition:border-color .2s}
+.file-upload-area:hover{border-color:#4a9eff;color:#4a9eff}
+.file-list{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+.file-item{display:flex;align-items:center;gap:8px;padding:4px 8px;background:#0f3460;border-radius:4px;font-size:12px}
+.file-item span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-item button{background:none;border:none;color:#ff6666;cursor:pointer;font-size:14px}
+.run-btn{width:100%;padding:9px;background:#1a6b3a;border:none;border-radius:4px;color:#7fff7f;font-size:13px;cursor:pointer;font-weight:bold;margin-top:8px}
+.run-btn:hover{background:#22883f}
+.run-btn:disabled{background:#333;color:#666;cursor:not-allowed}
+.shot-tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+.shot-tab{padding:3px 10px;background:#0f3460;border:1px solid #1a4a8a;border-radius:12px;cursor:pointer;font-size:11px}
+.shot-tab.active{background:#4a9eff;color:#000;border-color:#4a9eff}
+.output-text{background:#0a1628;border:1px solid #1a4a8a;border-radius:4px;padding:8px;font-size:12px;white-space:pre-wrap;max-height:200px;overflow-y:auto;color:#ccc}
+.download-btn{padding:4px 10px;background:#0f3460;border:1px solid #1a4a8a;border-radius:4px;color:#aaa;cursor:pointer;font-size:11px}
+.download-btn:hover{background:#1a4a8a;color:#fff}
+
+/* ── 镜头标签 & 预览按钮 ── */
+.shot-tag{display:inline-block;margin-top:4px;padding:2px 7px;background:#1a3a5c;border:1px solid #4a9eff;border-radius:10px;font-size:10px;color:#7fc4ff}
+.btn-preview{background:#2a1a5c;color:#c4a0ff}
+.btn-preview:hover{background:#3a2a7a}

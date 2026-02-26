@@ -1,0 +1,5 @@
+flask==3.0.3
+flask-cors==4.0.1
+requests==2.32.3
+python-docx==1.1.2
+Pillow==10.4.0
