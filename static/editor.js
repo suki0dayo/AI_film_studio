@@ -15,6 +15,23 @@ const canvas = document.getElementById('canvas');
 const svgLayer = document.getElementById('svg-layer');
 const canvasWrap = document.getElementById('canvas-wrap');
 
+// ── 辅助函数：获取屏幕中心 ─────────────────────────────────
+function getScreenCenter() {
+  const wrapRect = canvasWrap.getBoundingClientRect();
+  const centerX = wrapRect.left + wrapRect.width / 2;
+  const centerY = wrapRect.top + wrapRect.height / 2;
+  return { x: centerX, y: centerY };
+}
+
+function getCanvasCenter() {
+  const screenCenter = getScreenCenter();
+  const wrapRect = canvasWrap.getBoundingClientRect();
+  return {
+    x: screenCenter.x - wrapRect.left - _pan.x,
+    y: screenCenter.y - wrapRect.top - _pan.y
+  };
+}
+
 // ── 初始化：加载项目状态 ──────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
   const res = await fetch('/api/state');
@@ -58,10 +75,11 @@ window.addEventListener('mouseup', e => {
 function addNode(type) {
   const id = `${type}_${Date.now()}`;
   const cfg = NODE_TYPES[type];
+  const center = getCanvasCenter();
   const node = {
     id, type,
-    x: 100 + Math.random() * 300,
-    y: 100 + Math.random() * 200,
+    x: center.x + (Math.random() - 0.5) * 100,
+    y: center.y + (Math.random() - 0.5) * 100,
     status: 'idle',
     data: {},
     output: null,
