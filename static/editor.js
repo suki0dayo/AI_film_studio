@@ -446,6 +446,15 @@ function getUpstreamOutput(nodeId, portName) {
   return src.output || null;
 }
 
+// 按源节点类型查找上游输出（忽略端口名，防止接线接反）
+function getUpstreamByType(nodeId, srcType) {
+  const edge = edges.find(e => e.target === nodeId && nodes[e.source]?.type === srcType);
+  if (!edge) return null;
+  const src = nodes[edge.source];
+  if (srcType === 'Input_Character') return src.data?.characters || [];
+  return src.output || null;
+}
+
 // ── 读取文档内容 ──────────────────────────────────────────
 async function readDocFiles(files) {
   if (!files || !files.length) return '';
@@ -704,11 +713,11 @@ async function runKeyPic(id) {
   const node = nodes[id];
   const d = node.data || {};
   const s = _settings;
-  const picPrompts = getUpstreamOutput(id, 'pic_prompts') || '';
+  const picPrompts = getUpstreamByType(id, 'Output_Pic_ShotPrompt') || getUpstreamOutput(id, 'pic_prompts') || '';
   const parsed = extractJSON(picPrompts);
   const shots = parsed?.shots || [];
-  const label = d.shot_label || '1_1';
-  const shot  = shots.find(x => x.shot_id === label) || shots[0] || {};
+  const label = d.shot_label || '';
+  const shot  = (label ? shots.find(x => x.shot_id === label) : null) || shots[0] || {};
   const prompt = shot.positive_prompt || d.custom_prompt || 'cinematic shot';
   const genMode = d.keypic_gen_mode || 'comfyui';
 
@@ -784,24 +793,31 @@ async function runVideo(id) {
   const s = _settings;
   const vidMode = d.vid_gen_mode || 'comfyui';
 
-  const videoPrompts = getUpstreamOutput(id, 'video_prompts') || '';
+  // 按源节点类型获取，防止端口接反
+  const videoPrompts = getUpstreamByType(id, 'Output_Video_ShotPrompt') || getUpstreamOutput(id, 'video_prompts') || '';
   let motionPrompt = videoPrompts;
   const parsed = extractJSON(videoPrompts);
   if (parsed?.shots) {
-    const label = d.shot_label || '1_1';
-    const shot = parsed.shots.find(x => x.shot_id === label) || parsed.shots[0] || {};
-    motionPrompt = shot.motion_prompt || videoPrompts;
+    const label = d.shot_label || '';
+    const shot = label ? parsed.shots.find(x => x.shot_id === label) : null;
+    motionPrompt = shot?.motion_prompt || '';
   }
 
-  // 获取上游关键帧图片（图生视频模式需要）
+  // 获取上游关键帧图片（按节点类型查找，防止端口接反）
   function getKeyframeUrl() {
-    const edge = edges.find(e => e.target === id && e.dstPort === 'keyframes');
+    const edge = edges.find(e => e.target === id && nodes[e.source]?.type === 'Output_KeyPic')
+               || edges.find(e => e.target === id && e.dstPort === 'keyframes');
     const kp = edge ? nodes[edge.source] : null;
     return kp?.output_images?.[kp?.selected_image ?? 0] || '';
   }
   // 判断是否有图片参考输入（角色/环境节点接入）
   function hasImageRef() {
     return edges.some(e => e.target === id && (e.dstPort === 'characters' || e.dstPort === 'env_image'));
+  }
+
+  if (!motionPrompt || !motionPrompt.trim()) {
+    alert('视频提示词为空，请确认上游"视频描述生成"节点已执行并通过，且镜头编号匹配。');
+    return;
   }
 
   node.status = 'running';

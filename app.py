@@ -517,7 +517,8 @@ def video_gen_volcano():
         # 提交任务
         resp = req.post('https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks',
                         headers=headers, json=payload, timeout=60)
-        resp.raise_for_status()
+        if not resp.ok:
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text}")
         task_id = resp.json().get('id')
         # 轮询
         for _ in range(600):
@@ -569,7 +570,7 @@ def video_gen_google():
         if ref_img_url:
             img_bytes = req.get(ref_img_url, timeout=30).content
             gen_cfg['referenceImages'] = [{'mimeType': 'image/jpeg', 'bytesBase64Encoded': base64.b64encode(img_bytes).decode()}]
-        payload = {'instances': [{'prompt': data.get('prompt', '')}], 'parameters': {'generationConfig': gen_cfg}}
+        payload = {'instances': [{'prompt': data.get('prompt', '')}], 'parameters': gen_cfg}
         resp = req.post(
             f'https://generativelanguage.googleapis.com/v1beta/models/{model}:predictLongRunning?key={api_key}',
             json=payload, timeout=60)
