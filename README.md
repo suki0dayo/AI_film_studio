@@ -3,6 +3,12 @@
 
 本项目由开源社区共同维护，欢迎贡献代码、提交Issue或参与讨论。我们坚持透明、开放的开发原则，任何关于“付费版”“内部版”的说法均为虚假信息。
 
+# 3.5更新
+修复调用 Gemini 原生 API 时的 401 鉴权错误（改用 `?key=` 参数，支持自动检测 Gemini / OpenAI 兼容接口）；
+修复 Gemini 请求体格式错误 400（`contents` + `system_instruction` 格式）；
+图片生成接口去掉 OpenAI SDK 依赖，改用 requests 直调，错误信息更清晰；
+Google 视频生成端点修正为 `generateVideo`，轮询间隔优化为 10s，最长等待 20 分钟；
+
 # 3.4更新
 添加了图片与视频生成的全局预设功能
 关键帧生成模块新增常用分辨率（1080p/2K/4K等）及自定义选项（留空不发送size参数）
@@ -66,7 +72,10 @@ http://127.0.0.1:5000
 按回车，就能看到编辑器界面了。
 
 ---
+从现在开始是配置阶段，可以根据我给出的如下链接进行配置和使用参考
+https://www.bilibili.com/video/BV1fxPWz4EPJ/
 
+当然你也可以跟着文字看下去，原理都一样
 ## 第四步：配置 API（必须先做这一步）
 
 点击右上角的 **⚙ 设置** 按钮，填入：
@@ -189,7 +198,8 @@ python -m pip install -r requirements.txt
 确认终端里 `python app.py` 还在运行（没有报错），然后刷新浏览器。
 
 **Q: 调用 LLM 报错 "401"？**
-API Key 填错了，或者 API 地址不对。
+- OpenAI 兼容接口：检查 API Key 和 API 地址是否正确。
+- Gemini 原生接口：API 地址填 `https://generativelanguage.googleapis.com`，程序会自动用 `?key=` 方式鉴权，无需手动处理。
 
 **Q: ComfyUI 连接失败？**
 确认 ComfyUI 已经启动，地址默认是 `http://127.0.0.1:8188`。
