@@ -117,35 +117,53 @@ def call_llm():
     """
     通用 LLM 调用接口
     body: { api_url, api_key, model, system_prompt, user_prompt, node_id }
+    自动检测 Gemini 原生 API 与 OpenAI 兼容 API
     """
     import requests as req
     data = request.json
     node_id = data.get('node_id')
+    api_url = data.get('api_url', '').rstrip('/')
+    api_key = data.get('api_key', '')
+    model   = data.get('model', 'gpt-4o')
+    system_prompt = data.get('system_prompt', '')
+    user_prompt   = data.get('user_prompt', '')
+    temperature   = data.get('temperature', 0.7)
 
-    # 更新节点状态为运行中
     if node_id and node_id in project_state['nodes']:
         project_state['nodes'][node_id]['status'] = 'running'
         save_state(project_state)
 
     try:
-        headers = {
-            'Authorization': f"Bearer {data['api_key']}",
-            'Content-Type': 'application/json'
-        }
-        payload = {
-            'model': data.get('model', 'gpt-4o'),
-            'messages': [
-                {'role': 'system', 'content': data.get('system_prompt', '')},
-                {'role': 'user',   'content': data.get('user_prompt', '')}
-            ],
-            'temperature': data.get('temperature', 0.7)
-        }
-        resp = req.post(
-            data['api_url'].rstrip('/') + '/chat/completions',
-            headers=headers, json=payload, timeout=120
-        )
-        resp.raise_for_status()
-        result_text = resp.json()['choices'][0]['message']['content']
+        # 判断是否为 Gemini 原生 API
+        is_gemini = 'generativelanguage.googleapis.com' in api_url
+
+        if is_gemini:
+            # Gemini 原生格式：用 ?key= 鉴权，contents 格式
+            gemini_model = model  # 例如 gemini-2.0-flash
+            url = f'https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={api_key}'
+            payload = {'contents': [{'role': 'user', 'parts': [{'text': user_prompt}]}]}
+            if system_prompt:
+                payload['system_instruction'] = {'parts': [{'text': system_prompt}]}
+            payload['generationConfig'] = {'temperature': temperature}
+            resp = req.post(url, json=payload, timeout=120)
+        else:
+            # OpenAI 兼容格式
+            messages = []
+            if system_prompt:
+                messages.append({'role': 'system', 'content': system_prompt})
+            messages.append({'role': 'user', 'content': user_prompt})
+            headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
+            payload = {'model': model, 'messages': messages, 'temperature': temperature}
+            resp = req.post(api_url + '/chat/completions', headers=headers, json=payload, timeout=120)
+
+        if not resp.ok:
+            raise RuntimeError(f'HTTP {resp.status_code}: {resp.text}')
+
+        rj = resp.json()
+        if is_gemini:
+            result_text = rj['candidates'][0]['content']['parts'][0]['text']
+        else:
+            result_text = rj['choices'][0]['message']['content']
 
         if node_id and node_id in project_state['nodes']:
             project_state['nodes'][node_id]['status'] = 'done'
@@ -295,7 +313,7 @@ def image_gen():
     调用图片生成模型（OpenAI DALL-E 或兼容接口）
     body: { api_url, api_key, model, prompt, size, n, node_id }
     """
-    import requests as req
+    import requests as req, base64
     data = request.json
     node_id = data.get('node_id')
 
@@ -304,43 +322,33 @@ def image_gen():
         save_state(project_state)
 
     try:
-        headers = {
-            'Authorization': f"Bearer {data['api_key']}",
-            'Content-Type': 'application/json'
-        }
+        headers = {'Authorization': f"Bearer {data['api_key']}", 'Content-Type': 'application/json'}
         payload = {
-            'model':  data.get('model', 'dall-e-3'),
+            'model': data.get('model', 'dall-e-3'),
             'prompt': data.get('prompt', ''),
-            'n':      data.get('n', 1),
-            'size':   data.get('size', '1024x1024'),
-            'response_format': 'url'
+            'n': data.get('n', 1),
+            'size': data.get('size', '1024x1024'),
+            'response_format': 'b64_json',
         }
-        resp = req.post(
-            data['api_url'].rstrip('/') + '/images/generations',
-            headers=headers, json=payload, timeout=120
-        )
-        resp.raise_for_status()
-        result_data = resp.json().get('data', [])
+        resp = req.post(data['api_url'].rstrip('/') + '/images/generations',
+                        headers=headers, json=payload, timeout=90)
+        if not resp.ok:
+            raise RuntimeError(f'HTTP {resp.status_code}: {resp.text}')
+        rj = resp.json()
+        if 'error' in rj:
+            raise RuntimeError(str(rj['error']))
 
-        # 下载图片并缓存到本地
         images = []
-        for item in result_data:
-            img_url = item.get('url') or item.get('b64_json')
-            if item.get('b64_json'):
-                import base64
-                img_bytes = base64.b64decode(item['b64_json'])
-            else:
-                img_bytes = req.get(img_url, timeout=60).content
+        for item in rj.get('data', []):
+            img_bytes = base64.b64decode(item['b64_json']) if item.get('b64_json') else req.get(item['url'], timeout=60).content
             fname = f"{uuid.uuid4().hex}.png"
-            fpath = os.path.join(UPLOAD_DIR, fname)
-            with open(fpath, 'wb') as f:
+            with open(os.path.join(UPLOAD_DIR, fname), 'wb') as f:
                 f.write(img_bytes)
             images.append(f'/api/file/{fname}')
 
         if node_id and node_id in project_state['nodes']:
             n = project_state['nodes'][node_id]
-            existing = n.get('output_images', [])
-            n['output_images'] = (existing + images)[-3:]
+            n['output_images'] = (n.get('output_images', []) + images)[-3:]
             n['status'] = 'done'
             save_state(project_state)
 
@@ -426,24 +434,29 @@ def video_gen():
 @app.route('/api/image_gen_volcano', methods=['POST'])
 def image_gen_volcano():
     import requests as req
+    from openai import OpenAI
     data = request.json
     node_id = data.get('node_id')
     if node_id and node_id in project_state['nodes']:
         project_state['nodes'][node_id]['status'] = 'running'
         save_state(project_state)
     try:
-        headers = {'Authorization': f"Bearer {data['api_key']}", 'Content-Type': 'application/json'}
-        resp = req.post('https://ark.cn-beijing.volces.com/api/v3/images/generations',
-                        headers=headers, json=data['body'], timeout=120)
-        resp.raise_for_status()
-        result_data = resp.json().get('data', [])
+        client = OpenAI(base_url='https://ark.cn-beijing.volces.com/api/v3', api_key=data['api_key'])
+        body = data['body']
+        extra = {k: v for k, v in body.items() if k not in ('model', 'prompt', 'size', 'n', 'response_format')}
+        resp = client.images.generate(
+            model=body['model'], prompt=body['prompt'],
+            size=body.get('size'), n=body.get('n', 1),
+            response_format=body.get('response_format', 'url'),
+            extra_body=extra or None,
+        )
         images = []
-        for item in result_data:
-            if item.get('b64_json'):
+        for item in resp.data:
+            if item.b64_json:
                 import base64
-                img_bytes = base64.b64decode(item['b64_json'])
+                img_bytes = base64.b64decode(item.b64_json)
             else:
-                img_bytes = req.get(item['url'], timeout=60).content
+                img_bytes = req.get(item.url, timeout=60).content
             fname = f"{uuid.uuid4().hex}.png"
             with open(os.path.join(UPLOAD_DIR, fname), 'wb') as f:
                 f.write(img_bytes)
@@ -465,6 +478,7 @@ def image_gen_volcano():
 @app.route('/api/image_gen_google', methods=['POST'])
 def image_gen_google():
     import requests as req, base64
+    from openai import OpenAI
     data = request.json
     node_id = data.get('node_id')
     if node_id and node_id in project_state['nodes']:
@@ -472,48 +486,43 @@ def image_gen_google():
         save_state(project_state)
     try:
         api_key = data['api_key']
-        model   = data.get('model', 'imagen-3.0-generate-002')
+        model   = data.get('model', 'google/gemini-2.0-flash-exp:free')
         prompt  = data.get('prompt', '')
-        ref_img_url = data.get('ref_image_url')  # 可选参考图片
+        ref_img_url = data.get('ref_image_url')
 
+        client = OpenAI(base_url='https://openrouter.ai/api/v1', api_key=api_key)
+
+        content = prompt
         if ref_img_url:
-            # 有参考图：使用 multimodal contents 格式（generateContent）
             img_bytes = req.get(ref_img_url, timeout=30).content
-            parts = [
-                {'text': prompt},
-                {'inline_data': {'mime_type': 'image/jpeg', 'data': base64.b64encode(img_bytes).decode()}}
+            b64_ref = base64.b64encode(img_bytes).decode()
+            content = [
+                {'type': 'text', 'text': prompt},
+                {'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{b64_ref}'}}
             ]
-            payload = {'contents': [{'role': 'user', 'parts': parts}]}
-            url = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}'
-            resp = req.post(url, json=payload, timeout=120)
-            resp.raise_for_status()
-            images = []
-            for cand in resp.json().get('candidates', []):
-                for part in cand.get('content', {}).get('parts', []):
-                    b64 = part.get('inlineData', {}).get('data', '')
-                    if b64:
-                        fname = f"{uuid.uuid4().hex}.png"
-                        with open(os.path.join(UPLOAD_DIR, fname), 'wb') as f:
-                            f.write(base64.b64decode(b64))
-                        images.append(f'/api/file/{fname}')
-        else:
-            # 纯文本生图：使用 predict 接口（Imagen）
-            img_cfg = {k: v for k, v in data.get('image_config', {}).items() if v not in (None, '', [])}
-            payload = {'contents': [{'role': 'user', 'parts': [{'text': prompt}]}]}
-            if img_cfg:
-                payload['generationConfig'] = img_cfg
-            url = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}'
-            resp = req.post(url, json=payload, timeout=120)
-            resp.raise_for_status()
-            images = []
-            for cand in resp.json().get('candidates', []):
-                for part in cand.get('content', {}).get('parts', []):
-                    b64 = part.get('inlineData', {}).get('data', '')
-                    if b64:
-                        fname = f"{uuid.uuid4().hex}.png"
-                        with open(os.path.join(UPLOAD_DIR, fname), 'wb') as f:
-                            f.write(base64.b64decode(b64))
-                        images.append(f'/api/file/{fname}')
+
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{'role': 'user', 'content': content}],
+            extra_body={'modalities': ['image', 'text']}
+        )
+
+        images = []
+        msg = resp.choices[0].message
+        raw_images = getattr(msg, 'images', None) or []
+        for img in raw_images:
+            url_str = img.get('image_url', {}).get('url', '') if isinstance(img, dict) else ''
+            if url_str.startswith('data:'):
+                b64 = url_str.split(',', 1)[1]
+                img_bytes = base64.b64decode(b64)
+            elif url_str:
+                img_bytes = req.get(url_str, timeout=60).content
+            else:
+                continue
+            fname = f"{uuid.uuid4().hex}.png"
+            with open(os.path.join(UPLOAD_DIR, fname), 'wb') as f:
+                f.write(img_bytes)
+            images.append(f'/api/file/{fname}')
 
         if node_id and node_id in project_state['nodes']:
             n = project_state['nodes'][node_id]
@@ -591,48 +600,41 @@ def video_gen_google():
         api_key  = data['api_key']
         model    = data.get('model', 'veo-3.1-generate-preview')
         prompt   = data.get('prompt', '')
-        vid_mode = data.get('vid_mode', 'text')  # text | first_frame | first_last | ref_image
+        vid_mode = data.get('vid_mode', 'text')
         params   = {k: v for k, v in data.get('parameters', {}).items() if v not in (None, '')}
 
         def url_to_b64(url):
             return base64.b64encode(req.get(url, timeout=30).content).decode()
 
         instance = {'prompt': prompt}
+        if vid_mode in ('first_frame', 'first_last') and data.get('first_frame_url'):
+            instance['image'] = {'mimeType': 'image/jpeg', 'bytesBase64Encoded': url_to_b64(data['first_frame_url'])}
+        if vid_mode == 'first_last' and data.get('last_frame_url'):
+            instance['lastFrame'] = {'mimeType': 'image/jpeg', 'bytesBase64Encoded': url_to_b64(data['last_frame_url'])}
+        if vid_mode == 'ref_image' and data.get('ref_image_url'):
+            instance['referenceImages'] = [{'referenceType': 'asset', 'image': {
+                'mimeType': 'image/jpeg', 'bytesBase64Encoded': url_to_b64(data['ref_image_url'])
+            }}]
 
-        if vid_mode == 'first_frame':
-            first_url = data.get('first_frame_url', '')
-            if first_url:
-                instance['image'] = {'mimeType': 'image/jpeg', 'bytesBase64Encoded': url_to_b64(first_url)}
-
-        elif vid_mode == 'first_last':
-            first_url = data.get('first_frame_url', '')
-            last_url  = data.get('last_frame_url', '')
-            if first_url:
-                instance['image'] = {'mimeType': 'image/jpeg', 'bytesBase64Encoded': url_to_b64(first_url)}
-            if last_url:
-                instance['lastFrame'] = {'mimeType': 'image/jpeg', 'bytesBase64Encoded': url_to_b64(last_url)}
-
-        elif vid_mode == 'ref_image':
-            ref_url = data.get('ref_image_url', '')
-            if ref_url:
-                instance['referenceImages'] = [{'referenceType': 'asset', 'image': {
-                    'mimeType': 'image/jpeg', 'bytesBase64Encoded': url_to_b64(ref_url)
-                }}]
-
-        payload = {'instances': [instance], 'parameters': params}
+        # 使用 generateVideo 端点（?key= 鉴权，避免 401）
         resp = req.post(
-            f'https://generativelanguage.googleapis.com/v1beta/models/{model}:predictLongRunning?key={api_key}',
-            json=payload, timeout=60)
-        resp.raise_for_status()
+            f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateVideo?key={api_key}',
+            json={'instances': [instance], 'parameters': params}, timeout=60)
+        if not resp.ok:
+            raise RuntimeError(f'HTTP {resp.status_code}: {resp.text}')
         op_name = resp.json().get('name', '')
-        for _ in range(300):
-            time.sleep(5)
+        # 10s 间隔轮询，最多 120 次（20 分钟）
+        for _ in range(120):
+            time.sleep(10)
             r = req.get(f'https://generativelanguage.googleapis.com/v1beta/{op_name}?key={api_key}', timeout=30)
-            r.raise_for_status()
+            if not r.ok:
+                continue
             rj = r.json()
             if rj.get('done'):
+                if 'error' in rj:
+                    raise RuntimeError(str(rj['error']))
                 videos = []
-                for vid in rj.get('response', {}).get('generateVideoResponse', {}).get('generatedSamples', []):
+                for vid in rj.get('response', {}).get('generatedSamples', []):
                     vid_uri = vid.get('video', {}).get('uri', '')
                     if vid_uri:
                         vid_bytes = req.get(f'{vid_uri}:download?alt=media&key={api_key}', timeout=120).content
